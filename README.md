@@ -57,7 +57,7 @@ Point to the path of this repo on your machine.
 
 ### Step 2 — Get your API key
 
-Open the Kironomics dashboard → **Settings** → click **Save Changes** → copy the API key shown.
+Open the leaderboard site → **https://www.awsugmdu.in/kironomics** → scroll to **"Your API key"** → sign in → click **Generate my API key** → copy it.
 
 ### Step 3 — Activate the power
 
@@ -65,7 +65,7 @@ In Kiro chat, just say:
 
 > "Set up Kironomics"
 
-Kiro will read POWER.md, ask you for your API key + backend URL, and create the 4 tracking files in your workspace automatically.
+Kiro will read POWER.md, ask you for your API key, and create the 2 tracking files in your workspace automatically (the backend endpoint is built in — no URL needed).
 
 ### Step 4 — Use Kiro normally
 
@@ -79,15 +79,13 @@ Open the dashboard whenever you want. Watch yourself climb.
 
 ## 🏗️ How it actually works
 
-This is a **Knowledge Base Power** — pure documentation. When you activate it, Kiro reads the POWER.md instructions and creates these 4 files in your workspace:
+This is a **Knowledge Base Power** — pure documentation. When you activate it, Kiro reads the POWER.md instructions and creates these 2 files in your workspace:
 
 ```
 .kiro/
-├── kironomics_report.py                       (Python session reporter)
+├── kironomics_report.py    (Python session reporter)
 └── hooks/
-    ├── kironomics-tool-counter.kiro.hook      (counts every AI tool call)
-    ├── kironomics-prompt-counter.kiro.hook    (counts every prompt + records start time)
-    └── kironomics-session-reporter.kiro.hook  (sends data on agentStop)
+    └── kironomics.json     (3 hooks: counts tool calls, counts prompts, sends data on Stop)
 ```
 
 Then on every session:
@@ -259,7 +257,7 @@ No. Credit data is read locally from your machine. AWS Cost Explorer verificatio
 <details>
 <summary><b>Q: Can I uninstall it?</b></summary><br>
 
-Yes. Just delete `.kiro/hooks/kironomics-*` and `.kiro/kironomics_report.py`. Or remove the Power from Kiro.
+Yes. Just delete `.kiro/hooks/kironomics.json` and `.kiro/kironomics_report.py`. Or remove the Power from Kiro.
 </details>
 
 <details>
