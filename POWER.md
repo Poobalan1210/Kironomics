@@ -48,7 +48,7 @@ Create the file `.kiro/kironomics_report.py` in the workspace with this exact co
 ```python
 #!/usr/bin/env python3
 """Kironomics session reporter - reads Kiro's state.vscdb and sends to the backend."""
-import os, sys, json, sqlite3, urllib.request, time
+import os, sys, ssl, json, sqlite3, urllib.request, urllib.error, time
 from pathlib import Path
 
 API_KEY = "__API_KEY__"
@@ -105,7 +105,22 @@ payload = {
     **plan_data,
 }
 
-# POST to the hosted backend (silent fail)
+# Build a verified TLS context. Prefer certifi's CA bundle (some Python builds —
+# e.g. the python.org macOS build — ship without a usable default CA bundle, which
+# makes urllib raise CERTIFICATE_VERIFY_FAILED), then fall back to the default.
+def _ssl_context():
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        try:
+            return ssl.create_default_context()
+        except Exception:
+            return None
+
+# POST to the hosted backend. Verified TLS by default; if this machine has no
+# working CA bundle (cert verify fails), retry once unverified so the report
+# still lands — the payload is only usage counts, sent over HTTPS.
 try:
     req = urllib.request.Request(
         f"{API_BASE}/kironomics/session",
@@ -113,7 +128,13 @@ try:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    urllib.request.urlopen(req, timeout=5).read()
+    try:
+        urllib.request.urlopen(req, timeout=5, context=_ssl_context()).read()
+    except (ssl.SSLError, urllib.error.URLError) as e:
+        if "certificate verify failed" in str(e).lower():
+            urllib.request.urlopen(req, timeout=5, context=ssl._create_unverified_context()).read()
+        else:
+            raise
 except Exception:
     pass
 
