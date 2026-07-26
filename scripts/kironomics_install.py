@@ -333,6 +333,12 @@ def find_legacy(scan_roots, max_depth):
                 candidate = kiro_dir / filename
                 if candidate.is_file():
                     found.append(candidate)
+            # The old setup ran py_compile, leaving orphaned bytecode behind
+            # after the .py files go. Harmless but untidy, and it makes a
+            # workspace look like it still has Kironomics in it.
+            for candidate in (kiro_dir / "__pycache__").glob("kironomics_*.pyc"):
+                if candidate.is_file():
+                    found.append(candidate)
     return sorted(set(found))
 
 
