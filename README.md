@@ -367,8 +367,14 @@ This is a Knowledge Base Power following Kiro's official pattern. POWER.md tells
 
 ```
 .
-├── POWER.md                        ← Power manifest (Kiro reads this on activation)
+├── POWER.md                        ← Power manifest + onboarding (Kiro reads this on activation)
+├── LICENSE                         ← MIT
 ├── README.md                       ← This file (for GitHub viewers)
+├── steering/                       ← Loaded on demand, keeps POWER.md small
+│   ├── kironomics-workflows.md         (verify, migrate, rotate key, uninstall)
+│   ├── kironomics-troubleshooting.md   (nothing tracked, score wrong, etc.)
+│   ├── kironomics-scoring.md           (score, titles, badges, plans, anti-cheat)
+│   └── kironomics-hook-reference.md    (hook internals, 0.x migration, fallback)
 └── scripts/
     ├── kironomics_install.py       ← One-shot installer (version gate, migration, uninstall)
     ├── kironomics_counter.py       ← Increments per-workspace counters
@@ -376,6 +382,10 @@ This is a Knowledge Base Power following Kiro's official pattern. POWER.md tells
 ```
 
 No MCP server, no node_modules, no `pip install`. The scripts use only the Python standard library.
+
+POWER.md stays deliberately short because everything in it loads into agent context on activation. Deep-dive content lives in `steering/`, which Kiro loads only when the task calls for it.
+
+> **Why an installer, rather than shipping the hooks in this repo?** Powers can deliver `steering/` files, but not hooks. A `hooks/` directory in a power repo is copied to `~/.kiro/powers/installed/<name>/hooks/` and then ignored, so it never fires. That is tracked in [kirodotdev/Kiro#9007](https://github.com/kirodotdev/Kiro/issues/9007), still open. Until it lands, writing `~/.kiro/hooks/kironomics.json` from a script is the only route to global hooks from a power.
 
 ### Installer reference
 
@@ -436,9 +446,11 @@ PRs welcome. Ideas worth submitting:
 
 ---
 
-## 📜 License
+## 📜 License, Privacy & Support
 
-MIT — go wild.
+- **License:** MIT (SPDX: `MIT`), Copyright (c) 2026 AWS User Group Madurai. Full text in [LICENSE](LICENSE). Go wild.
+- **Privacy:** https://www.awsugmdu.in/kironomics#privacy
+- **Support:** [open an issue](https://github.com/Poobalan1210/Kironomics/issues)
 
 ---
 
