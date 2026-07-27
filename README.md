@@ -38,10 +38,23 @@ Think Strava for AI coding. Or GitHub contributions, but spicier.
 | 📊 **Burn rate analytics** | "You'll run out of credits in 9 days at this pace" |
 | 🛡️ **Anti-cheat verified** | Reads your actual AWS-synced credit data |
 | 🤫 **Zero overhead** | Everything batches at session end |
+| 🌍 **Set up once, ever** | Global hooks track every workspace, new projects included |
 
 ---
 
-## ⚡ Quick Start (2 minutes)
+## ✅ Requirements
+
+| | Minimum | Why |
+|---|---|---|
+| **Kiro IDE** | **1.0.182** (Jul 20, 2026) | Added user-level global hooks (`~/.kiro/hooks/`) |
+| *or* **Kiro CLI** | **2.13.0** (Jul 17, 2026) | Same feature on the CLI |
+| **Python 3** | 3.8+ | Runs the counter + reporter (stdlib only) |
+
+> **On an older Kiro?** Hook files in `~/.kiro/hooks/` are simply never loaded, so the install would look fine and track nothing. The installer detects this and tells you to upgrade instead of leaving you with a dead setup. Update via **Kiro menu → Check for Updates**.
+
+---
+
+## ⚡ Quick Start (2 minutes, once per machine)
 
 ### Step 1 — Install the Power
 
@@ -49,7 +62,7 @@ In Kiro, open the **Powers panel** (left sidebar) and click **+ Add Custom Power
 
 **Option A — From GitHub (recommended):**
 ```
-https://github.com/logesh4v/Kironomics
+https://github.com/Poobalan1210/Kironomics
 ```
 
 **Option B — From local folder:**
@@ -65,63 +78,120 @@ In Kiro chat, just say:
 
 > "Set up Kironomics"
 
-Kiro will read POWER.md, ask you for your API key, and create the 2 tracking files in your workspace automatically (the backend endpoint is built in — no URL needed).
+Kiro reads POWER.md, checks your Kiro version, asks for your API key, and runs the installer. Everything lands in your home directory. **Nothing is written into your project.**
 
-### Step 4 — Use Kiro normally
+Prefer doing it yourself? Run the installer directly:
 
-Tracking is silent and passive. When the agent stops, one batched request goes to the leaderboard.
+```bash
+python3 ~/.kiro/powers/repos/kironomics/scripts/kironomics_install.py \
+  --api-key "<YOUR_KEY>" --scan-root ~ --prune
+```
 
-### Step 5 — Check your rank
+*(Windows: use `python` instead of `python3`.)*
+
+### Step 4 — Restart Kiro once
+
+Kiro scans hook files at startup. After this restart, tracking is live.
+
+### Step 5 — Use Kiro normally, in any project
+
+Every workspace on this machine is now tracked automatically, including projects you haven't created yet. **You never run setup again.**
+
+Check state any time:
+
+```bash
+python3 ~/.kiro/powers/repos/kironomics/scripts/kironomics_install.py --status
+```
+
+### Step 6 — Check your rank
 
 Open the dashboard whenever you want. Watch yourself climb.
 
 ---
 
+## 🌍 One setup, every workspace
+
+Kironomics used to be installed per project: files in every repo's `.kiro/`, with that repo's absolute path baked into the `Stop` hook, re-done by hand each time you started something new. Kiro IDE **1.0.182** fixed that by adding user-level global hooks.
+
+Kironomics now installs **once per machine**:
+
+```
+~/.kiro/
+├── kironomics/
+│   ├── kironomics_counter.py   ← PostToolUse + UserPromptSubmit
+│   ├── kironomics_report.py    ← Stop
+│   └── config.json             ← your API key (mode 600)
+└── hooks/
+    └── kironomics.json         ← all three hooks, v1 format
+```
+
+The trick is that every path in the hook file points at your **home directory** instead of a workspace. A home path is stable for the life of the machine, so one hook file serves every project you'll ever open.
+
+**Already had the old per-workspace setup?** Pass `--scan-root ~ --prune` and the installer retires it for you. This matters: leaving the old hooks in place alongside the global ones **double-counts every tool call**, which inflates your score and can trip the backend's anti-cheat checks. Other hooks in the same folder are never touched.
+
+**Coming from Kiro 0.x?** Hooks changed format in IDE 1.0. The old one-file-per-hook `.kiro.hook` schema was replaced by a structured v1 JSON document, and triggers were renamed (`promptSubmit` → `UserPromptSubmit`, `postToolUse` → `PostToolUse`, `agentStop` → `Stop`). Legacy files show an upgrade badge in the Agent Hooks panel and stop executing. Upgrading and running the installer replaces them in one step.
+
+---
+
 ## 🏗️ How it actually works
 
-This is a **Knowledge Base Power** — pure documentation. When you activate it, Kiro reads the POWER.md instructions and creates these 2 files in your workspace:
+This is a **Knowledge Base Power**. When you activate it, Kiro reads POWER.md and runs `scripts/kironomics_install.py`, which writes three global hooks plus two scripts into your home directory:
 
 ```
-.kiro/
-├── kironomics_report.py    (Python session reporter)
+~/.kiro/
+├── kironomics/
+│   ├── kironomics_counter.py   (increments the counters)
+│   ├── kironomics_report.py    (reads credits, sends the session)
+│   └── config.json             (API key + backend URL)
 └── hooks/
-    └── kironomics.json     (3 hooks: counts tool calls, counts prompts, sends data on Stop)
+    └── kironomics.json         (PostToolUse + UserPromptSubmit + Stop)
 ```
 
-Then on every session:
+Then on every session, in every workspace:
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                          YOUR LAPTOP                                │
-│                                                                     │
-│   ┌──────────────┐    auto-writes    ┌────────────────────────┐    │
-│   │  Kiro IDE    │ ─────────────────►│ state.vscdb            │    │
-│   │              │                   │ └─ kiro.kiroAgent      │    │
-│   │              │                   │     └─ usageState      │    │
-│   └──────────────┘                   │         ├─ currentUsage│    │
-│         │                            │         ├─ usageLimit  │    │
-│         │                            │         └─ resetDate   │    │
-│         ▼                            └────────────────────────┘    │
-│   ┌────────────────────────────────────────┴────────────────┐      │
-│   │   3 Silent Hooks                                         │      │
-│   │   1️⃣ Tool Counter   → /tmp/kironomics_tools             │      │
-│   │   2️⃣ Prompt Counter → /tmp/kironomics_prompts           │      │
-│   │   3️⃣ Session Reporter (agentStop):                      │      │
-│   │       runs Python script:                                │      │
-│   │       • reads /tmp counters                              │      │
-│   │       • reads state.vscdb credit data                    │      │
-│   │       • POSTs to backend                                 │      │
-│   └─────────────────────────────────────────────────────────┘      │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ HTTPS POST (1 request per session)
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│   📊 KIRONOMICS BACKEND                                           │
-│   • Validates token                                                │
-│   • Detects plan (Free / Pro / Pro+ / Power)                       │
-│   • Calculates score                                               │
-│   • Updates leaderboard                                            │
-└──────────────────────────────────────────────────────────────────┘
+│                                                                    │
+│                            YOUR LAPTOP                             │
+│                                                                    │
+│  ┌──────────────┐                 ┌───────────────────────────┐    │
+│  │              │   auto-writes   │ state.vscdb               │    │
+│  │   Kiro IDE   │ ───────────────>│  └─ kiro.kiroAgent        │    │
+│  │              │                 │      └─ usageState        │    │
+│  │              │                 │          ├─ currentUsage  │    │
+│  └──────┬───────┘                 │          ├─ usageLimit    │    │
+│         │                         │          └─ resetDate     │    │
+│         │                         └─────────────┬─────────────┘    │
+│         │                                       │ read-only        │
+│         ▼                                       ▼                  │
+│  ┌────────────────────────────────────────────────────────────┐    │
+│  │  3 GLOBAL HOOKS       ~/.kiro/hooks/kironomics.json        │    │
+│  │  fire in EVERY workspace, no per-project setup             │    │
+│  │                                                            │    │
+│  │  (1) PostToolUse       ->  <tmp>/kironomics_<ws>_tools     │    │
+│  │  (2) UserPromptSubmit  ->  <tmp>/kironomics_<ws>_prompts   │    │
+│  │  (3) Stop              ->  runs the reporter:              │    │
+│  │         - reads this workspace's counters                  │    │
+│  │         - reads state.vscdb credit data                    │    │
+│  │         - POSTs once, then clears the counters             │    │
+│  │                                                            │    │
+│  │  <ws> = hash of the workspace path, so two open Kiro       │    │
+│  │  windows never pool into one bogus session.                │    │
+│  └────────────────────────────────┬───────────────────────────┘    │
+│                                   │                                │
+└───────────────────────────────────┬────────────────────────────────┘
+                                    │  HTTPS POST, 1 per session      
+                                    ▼                                 
+┌───────────────────────────────────┴────────────────────────────────┐
+│                                                                    │
+│  KIRONOMICS BACKEND                                                │
+│                                                                    │
+│  - Validates the API key                                           │
+│  - Detects the plan (Free / Pro / Pro+ / Power)                    │
+│  - Computes credits consumed, then the score                       │
+│  - Updates the leaderboard                                         │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -182,16 +252,16 @@ Personal Metrics card preview:
 
 ```
 ┌────────────────────────────────────────────────────┐
-│ 📊 Plan & Credits          Kiro Pro+    $40/mo     │
-│ Live data from Kiro IDE                            │
-│                                                     │
-│ 1,246.79 / 2,000 credits             62.3%         │
-│ ████████████░░░░░░░░                                │
-│                                                     │
-│ ┌────────┬──────────┬──────────┬──────────────┐    │
-│ │ 753    │ 17 days  │ 73/day   │ 9 days       │    │
-│ │ Remain │ Resets in│ Burn rate│ Will run out │    │
-│ └────────┴──────────┴──────────┴──────────────┘    │
+│  Plan & Credits             Kiro Pro+     $40/mo   │
+│  Live data from Kiro IDE                           │
+│                                                    │
+│  1,246.79 / 2,000 credits                    62.3% │
+│  ████████████████████████░░░░░░░░░░░░░░░           │
+│                                                    │
+│  ┌──────────┬───────────┬───────────┬────────────┐ │
+│  │ 753      │ 17 days   │ 73 / day  │ 9 days     │ │
+│  │ Remain   │ Resets in │ Burn rate │ Runs out   │ │
+│  └──────────┴───────────┴───────────┴────────────┘ │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -233,13 +303,33 @@ Nothing about *what* you typed or what the code looked like. Just counts.
 <details>
 <summary><b>Q: Where does the credit data come from?</b></summary><br>
 
-From `state.vscdb` — Kiro's own SQLite database that lives at:
+From `state.vscdb`, Kiro's own SQLite database:
 
-```
-~/Library/Application Support/Kiro/User/globalStorage/state.vscdb
-```
+| Platform | Path |
+|---|---|
+| macOS | `~/Library/Application Support/Kiro/User/globalStorage/state.vscdb` |
+| Windows | `%APPDATA%\Kiro\User\globalStorage\state.vscdb` |
+| Linux | `~/.config/Kiro/User/globalStorage/state.vscdb` |
 
-We open it in **read-only** mode, so Kiro IDE is never affected.
+We open it `mode=ro&immutable=1`, read-only and immutable, so Kiro IDE is never affected.
+</details>
+
+<details>
+<summary><b>Q: I started a new project. Do I set this up again?</b></summary><br>
+
+No. That's the whole point of the global install. The hooks live in `~/.kiro/hooks/` and fire in every workspace you open, including ones that don't exist yet.
+</details>
+
+<details>
+<summary><b>Q: I'm on an older Kiro. What happens?</b></summary><br>
+
+The installer refuses and tells you to upgrade. Global hooks landed in **IDE 1.0.182** (Jul 20, 2026) and **CLI 2.13.0** (Jul 17, 2026). Before that, `~/.kiro/hooks/` isn't read at all, so an install would silently track nothing. Better to be told than to sit at zero on the leaderboard wondering why.
+</details>
+
+<details>
+<summary><b>Q: Does this work on Windows?</b></summary><br>
+
+Yes. The counter and reporter resolve the temp directory and the `state.vscdb` location per platform, and the installer records absolute interpreter and script paths, so there's no dependency on `bash`, `/tmp`, or `python3` being on `PATH`.
 </details>
 
 <details>
@@ -257,13 +347,25 @@ No. Credit data is read locally from your machine. AWS Cost Explorer verificatio
 <details>
 <summary><b>Q: Can I uninstall it?</b></summary><br>
 
-Yes. Just delete `.kiro/hooks/kironomics.json` and `.kiro/kironomics_report.py`. Or remove the Power from Kiro.
+One command:
+
+```bash
+python3 ~/.kiro/powers/repos/kironomics/scripts/kironomics_install.py --uninstall
+```
+
+That removes the hooks, both scripts, and your stored key. Restart Kiro and tracking stops immediately.
+</details>
+
+<details>
+<summary><b>Q: How do I rotate my API key?</b></summary><br>
+
+Edit `~/.kiro/kironomics/config.json`. The key lives there, not in the hooks, so nothing else changes. Or re-run the installer with the new `--api-key`.
 </details>
 
 <details>
 <summary><b>Q: Why no MCP server?</b></summary><br>
 
-This is a Knowledge Base Power following Kiro's official pattern. POWER.md tells Kiro the agent exactly what to create, and Kiro does it. Simpler, more reliable, and works in any workspace.
+This is a Knowledge Base Power following Kiro's official pattern. POWER.md tells the Kiro agent exactly what to run, and Kiro does it. Simpler, more reliable, and there's no server process to keep alive.
 </details>
 
 ---
@@ -272,13 +374,37 @@ This is a Knowledge Base Power following Kiro's official pattern. POWER.md tells
 
 ```
 .
-├── POWER.md           ← Power manifest (Kiro reads this on activation)
-└── README.md          ← This file (for GitHub viewers)
+├── POWER.md                        ← Power manifest + onboarding (Kiro reads this on activation)
+├── LICENSE                         ← MIT
+├── README.md                       ← This file (for GitHub viewers)
+├── steering/                       ← Loaded on demand, keeps POWER.md small
+│   ├── kironomics-workflows.md         (verify, migrate, rotate key, uninstall)
+│   ├── kironomics-troubleshooting.md   (nothing tracked, score wrong, etc.)
+│   ├── kironomics-scoring.md           (score, titles, badges, plans, anti-cheat)
+│   └── kironomics-hook-reference.md    (hook internals, 0.x migration, fallback)
+└── scripts/
+    ├── kironomics_install.py       ← One-shot installer (version gate, migration, uninstall)
+    ├── kironomics_counter.py       ← Increments per-workspace counters
+    └── kironomics_report.py        ← Reads credits, sends the session
 ```
 
-That's it. Two files. No MCP server, no node_modules, no path issues.
+No MCP server, no node_modules, no `pip install`. The scripts use only the Python standard library.
 
-When you activate the Power, Kiro reads POWER.md and creates the tracking files in your workspace.
+POWER.md stays deliberately short because everything in it loads into agent context on activation. Deep-dive content lives in `steering/`, which Kiro loads only when the task calls for it.
+
+> **Why an installer, rather than shipping the hooks in this repo?** Powers can deliver `steering/` files, but not hooks. A `hooks/` directory in a power repo is copied to `~/.kiro/powers/installed/<name>/hooks/` and then ignored, so it never fires. That is tracked in [kirodotdev/Kiro#9007](https://github.com/kirodotdev/Kiro/issues/9007), still open. Until it lands, writing `~/.kiro/hooks/kironomics.json` from a script is the only route to global hooks from a power.
+
+### Installer reference
+
+| Command | What it does |
+|---|---|
+| `--api-key <KEY>` | Install globally (default action) |
+| `--status` | Show detected Kiro version and what's installed |
+| `--scan-root <DIR> --prune` | Find and remove old per-workspace installs |
+| `--api-base <URL>` | Point at your own backend |
+| `--python <PATH>` | Pin a specific interpreter for the hooks |
+| `--force` | Install despite a failed version check |
+| `--uninstall` | Remove everything |
 
 ---
 
@@ -327,9 +453,11 @@ PRs welcome. Ideas worth submitting:
 
 ---
 
-## 📜 License
+## 📜 License, Privacy & Support
 
-MIT — go wild.
+- **License:** MIT (SPDX: `MIT`), Copyright (c) 2026 AWS User Group Madurai. Full text in [LICENSE](LICENSE). Go wild.
+- **Privacy:** https://www.awsugmdu.in/kironomics#privacy
+- **Support:** [open an issue](https://github.com/Poobalan1210/Kironomics/issues)
 
 ---
 
