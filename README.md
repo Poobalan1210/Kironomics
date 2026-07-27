@@ -151,40 +151,47 @@ Then on every session, in every workspace:
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                          YOUR LAPTOP                                │
-│                                                                     │
-│   ┌──────────────┐    auto-writes    ┌────────────────────────┐    │
-│   │  Kiro IDE    │ ─────────────────►│ state.vscdb            │    │
-│   │              │                   │ └─ kiro.kiroAgent      │    │
-│   │              │                   │     └─ usageState      │    │
-│   └──────────────┘                   │         ├─ currentUsage│    │
-│         │                            │         ├─ usageLimit  │    │
-│         │                            │         └─ resetDate   │    │
-│         ▼                            └────────────────────────┘    │
-│   ┌────────────────────────────────────────┴────────────────┐      │
-│   │   3 Global Hooks  (~/.kiro/hooks/kironomics.json)        │      │
-│   │   fire in EVERY workspace, no per-project setup          │      │
-│   │                                                          │      │
-│   │   1️⃣ PostToolUse      → <tmp>/kironomics_<ws>_tools     │      │
-│   │   2️⃣ UserPromptSubmit → <tmp>/kironomics_<ws>_prompts   │      │
-│   │   3️⃣ Stop → runs the reporter:                          │      │
-│   │       • reads this workspace's counters                  │      │
-│   │       • reads state.vscdb credit data (read-only)        │      │
-│   │       • POSTs once, then clears the counters             │      │
-│   │                                                          │      │
-│   │   <ws> = hash of the workspace path, so two open Kiro    │      │
-│   │   windows never pool into one bogus session.             │      │
-│   └─────────────────────────────────────────────────────────┘      │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ HTTPS POST (1 request per session)
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│   📊 KIRONOMICS BACKEND                                           │
-│   • Validates token                                                │
-│   • Detects plan (Free / Pro / Pro+ / Power)                       │
-│   • Calculates score                                               │
-│   • Updates leaderboard                                            │
-└──────────────────────────────────────────────────────────────────┘
+│                                                                    │
+│                            YOUR LAPTOP                             │
+│                                                                    │
+│  ┌──────────────┐                 ┌───────────────────────────┐    │
+│  │              │   auto-writes   │ state.vscdb               │    │
+│  │   Kiro IDE   │ ───────────────>│  └─ kiro.kiroAgent        │    │
+│  │              │                 │      └─ usageState        │    │
+│  │              │                 │          ├─ currentUsage  │    │
+│  └──────┬───────┘                 │          ├─ usageLimit    │    │
+│         │                         │          └─ resetDate     │    │
+│         │                         └─────────────┬─────────────┘    │
+│         │                                       │ read-only        │
+│         ▼                                       ▼                  │
+│  ┌────────────────────────────────────────────────────────────┐    │
+│  │  3 GLOBAL HOOKS       ~/.kiro/hooks/kironomics.json        │    │
+│  │  fire in EVERY workspace, no per-project setup             │    │
+│  │                                                            │    │
+│  │  (1) PostToolUse       ->  <tmp>/kironomics_<ws>_tools     │    │
+│  │  (2) UserPromptSubmit  ->  <tmp>/kironomics_<ws>_prompts   │    │
+│  │  (3) Stop              ->  runs the reporter:              │    │
+│  │         - reads this workspace's counters                  │    │
+│  │         - reads state.vscdb credit data                    │    │
+│  │         - POSTs once, then clears the counters             │    │
+│  │                                                            │    │
+│  │  <ws> = hash of the workspace path, so two open Kiro       │    │
+│  │  windows never pool into one bogus session.                │    │
+│  └────────────────────────────────┬───────────────────────────┘    │
+│                                   │                                │
+└───────────────────────────────────┬────────────────────────────────┘
+                                    │  HTTPS POST, 1 per session      
+                                    ▼                                 
+┌───────────────────────────────────┴────────────────────────────────┐
+│                                                                    │
+│  KIRONOMICS BACKEND                                                │
+│                                                                    │
+│  - Validates the API key                                           │
+│  - Detects the plan (Free / Pro / Pro+ / Power)                    │
+│  - Computes credits consumed, then the score                       │
+│  - Updates the leaderboard                                         │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -245,16 +252,16 @@ Personal Metrics card preview:
 
 ```
 ┌────────────────────────────────────────────────────┐
-│ 📊 Plan & Credits          Kiro Pro+    $40/mo     │
-│ Live data from Kiro IDE                            │
-│                                                     │
-│ 1,246.79 / 2,000 credits             62.3%         │
-│ ████████████░░░░░░░░                                │
-│                                                     │
-│ ┌────────┬──────────┬──────────┬──────────────┐    │
-│ │ 753    │ 17 days  │ 73/day   │ 9 days       │    │
-│ │ Remain │ Resets in│ Burn rate│ Will run out │    │
-│ └────────┴──────────┴──────────┴──────────────┘    │
+│  Plan & Credits             Kiro Pro+     $40/mo   │
+│  Live data from Kiro IDE                           │
+│                                                    │
+│  1,246.79 / 2,000 credits                    62.3% │
+│  ████████████████████████░░░░░░░░░░░░░░░           │
+│                                                    │
+│  ┌──────────┬───────────┬───────────┬────────────┐ │
+│  │ 753      │ 17 days   │ 73 / day  │ 9 days     │ │
+│  │ Remain   │ Resets in │ Burn rate │ Runs out   │ │
+│  └──────────┴───────────┴───────────┴────────────┘ │
 └────────────────────────────────────────────────────┘
 ```
 
