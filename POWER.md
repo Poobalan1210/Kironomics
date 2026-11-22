@@ -12,7 +12,9 @@ author: "Logesh"
 
 Kironomics is a gamified usage-tracking system for Kiro IDE inspired by Meta's "Claudinomics" internal leaderboard. It tracks your prompts, tool calls, session time, and real Kiro credit consumption (read directly from Kiro's local `state.vscdb`). Then it ranks you on the AWS User Group Madurai leaderboard with titles like "Kiro Novice", "Tool Wielder", and "Session Immortal".
 
-The system uses a single Kiro hooks file (three hooks) plus one Python reporter script. Hooks silently count activity during each session; at the end, the Python script reads Kiro's own credit data from `state.vscdb` and sends one batched request to the Kironomics backend. Zero overhead during work.
+The system uses one shared Python reporter per machine (`~/.kironomics/report.py`, published at https://www.awsugmdu.in/kiro/report.py) plus a Kiro hooks file in each workspace. Hooks silently count activity during each session; at the end, the reporter reads Kiro's own credit data from `state.vscdb` (including bonus credit pools) and sends one batched request to the Kironomics backend. Zero overhead during work.
+
+Because every workspace runs the same shared reporter, fixes ship by updating that one file — see **Workflow: Updating Kironomics**.
 
 ## Backend
 
@@ -41,184 +43,60 @@ Ask the user for their API key in conversation:
 
 Save the pasted value as `API_KEY` for the next step. (Optional: if the user is self-hosting the backend, also ask for an API base URL and save it as `API_BASE`; otherwise use the default endpoint above.)
 
-### Step 3: Create the Reporter Script
+### Step 3: Install the Shared Reporter
 
-Create the file `.kiro/kironomics_report.py` in the workspace with this exact content. Replace `__API_KEY__` with the user's API key. Leave `API_BASE` as the default unless the user provided their own.
+Download the reporter once per machine into `~/.kironomics/`. Run the command for the user's OS:
 
-```python
-#!/usr/bin/env python3
-"""Kironomics session reporter - reads Kiro's state.vscdb and sends to the backend."""
-import os, sys, ssl, json, sqlite3, urllib.request, urllib.error, time
-from pathlib import Path
-
-API_KEY = "__API_KEY__"
-API_BASE = "https://2q4zt5zl9e.execute-api.us-east-1.amazonaws.com/dev"
-
-def read_int(path, default=0):
-    try:
-        return int(Path(path).read_text().strip())
-    except Exception:
-        return default
-
-tools = read_int("/tmp/kironomics_tools")
-prompts = read_int("/tmp/kironomics_prompts")
-start = read_int("/tmp/kironomics_start", int(time.time()))
-elapsed = max(0, int(time.time()) - start)
-
-# Read Kiro's state.vscdb (silent fail if missing or no usageState)
-plan_data = {}
-try:
-    home = Path.home()
-    if sys.platform == "darwin":
-        db = home / "Library/Application Support/Kiro/User/globalStorage/state.vscdb"
-    elif sys.platform.startswith("win"):
-        db = Path(os.environ.get("APPDATA", str(home / "AppData/Roaming"))) / "Kiro/User/globalStorage/state.vscdb"
-    else:
-        db = home / ".config/Kiro/User/globalStorage/state.vscdb"
-    if db.exists():
-        conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
-        row = conn.execute(
-            "SELECT value FROM ItemTable WHERE key=?",
-            ("kiro.kiroAgent",),
-        ).fetchone()
-        conn.close()
-        if row:
-            state = json.loads(row[0])
-            usage = state.get("kiro.resourceNotifications.usageState", {})
-            breakdowns = usage.get("usageBreakdowns", [])
-            if breakdowns:
-                bd = breakdowns[0]
-                plan_data = {
-                    "currentUsage": bd.get("currentUsage"),
-                    "usageLimit": bd.get("usageLimit"),
-                    "percentageUsed": bd.get("percentageUsed"),
-                    "resetDate": bd.get("resetDate"),
-                }
-except Exception:
-    pass
-
-payload = {
-    "token": API_KEY,
-    "tool_calls": tools,
-    "prompts": prompts,
-    "elapsed_seconds": elapsed,
-    **plan_data,
-}
-
-# Build a verified TLS context. Prefer certifi's CA bundle (some Python builds —
-# e.g. the python.org macOS build — ship without a usable default CA bundle, which
-# makes urllib raise CERTIFICATE_VERIFY_FAILED), then fall back to the default.
-def _ssl_context():
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        try:
-            return ssl.create_default_context()
-        except Exception:
-            return None
-
-# POST to the hosted backend. Verified TLS by default; if this machine has no
-# working CA bundle (cert verify fails), retry once unverified so the report
-# still lands — the payload is only usage counts, sent over HTTPS.
-try:
-    req = urllib.request.Request(
-        f"{API_BASE}/kironomics/session",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        urllib.request.urlopen(req, timeout=5, context=_ssl_context()).read()
-    except (ssl.SSLError, urllib.error.URLError) as e:
-        if "certificate verify failed" in str(e).lower():
-            urllib.request.urlopen(req, timeout=5, context=ssl._create_unverified_context()).read()
-        else:
-            raise
-except Exception:
-    pass
-
-# Cleanup temp counters
-for f in ("/tmp/kironomics_tools", "/tmp/kironomics_prompts", "/tmp/kironomics_start"):
-    try:
-        os.remove(f)
-    except Exception:
-        pass
-```
-
-After creating the file, verify it compiles:
+macOS / Linux:
 
 ```bash
-python3 -m py_compile .kiro/kironomics_report.py && echo "Reporter script OK"
+curl -fsSL https://www.awsugmdu.in/kiro/report.py --create-dirs -o ~/.kironomics/report.py
 ```
 
-### Step 4: Create the Hooks File
+Windows (PowerShell):
 
-Kiro uses a single versioned hook file with all hooks in one `hooks` array. Create the file `.kiro/hooks/kironomics.json`. Replace `__WORKSPACE_ROOT__` with the absolute path to the user's current workspace directory (the directory containing `.kiro/`). Find it with `pwd` from the agent's working directory and use the absolute path so the reporter runs regardless of which subfolder the agent is in.
-
-```json
-{
-  "version": "v1",
-  "hooks": [
-    {
-      "name": "Kironomics Tool Counter",
-      "trigger": "PostToolUse",
-      "matcher": ".*",
-      "description": "Silently counts tool calls for the Kironomics leaderboard.",
-      "action": {
-        "type": "command",
-        "command": "bash -c 'FILE=/tmp/kironomics_tools; COUNT=$(cat \"$FILE\" 2>/dev/null || echo 0); echo $((COUNT + 1)) > \"$FILE\"; echo ok'",
-        "timeout": 2
-      }
-    },
-    {
-      "name": "Kironomics Prompt Counter",
-      "trigger": "UserPromptSubmit",
-      "description": "Silently counts prompts and records session start time.",
-      "action": {
-        "type": "command",
-        "command": "bash -c 'START=/tmp/kironomics_start; PFILE=/tmp/kironomics_prompts; test -f \"$START\" || date +%s > \"$START\"; COUNT=$(cat \"$PFILE\" 2>/dev/null || echo 0); echo $((COUNT + 1)) > \"$PFILE\"; echo ok'",
-        "timeout": 2
-      }
-    },
-    {
-      "name": "Kironomics Session Reporter",
-      "trigger": "Stop",
-      "description": "Reads Kiro's credit usage and sends session data to the backend when the agent finishes.",
-      "action": {
-        "type": "command",
-        "command": "python3 \"__WORKSPACE_ROOT__/.kiro/kironomics_report.py\" 2>/dev/null; echo ok",
-        "timeout": 10
-      }
-    }
-  ]
-}
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.kironomics" | Out-Null
+Invoke-WebRequest -UseBasicParsing https://www.awsugmdu.in/kiro/report.py -OutFile "$env:USERPROFILE\.kironomics\report.py"
 ```
 
-Trigger names use the current Kiro hook format: `PostToolUse` (fires after each tool call), `UserPromptSubmit` (fires on each prompt), and `Stop` (fires when the agent finishes its turn). The `matcher` is a regex tested against the tool name (`.*` matches every tool) and only applies to `PostToolUse`.
+Do **not** write your own reporter script or paste the API key into any file in the workspace. The reporter keeps the key in `~/.kironomics/token`, outside the project, so it is never committed.
+
+### Step 4: Run Setup for This Workspace
+
+From the workspace root (the directory that contains, or will contain, `.kiro/`), run setup with the user's key. Use `python3` on macOS/Linux and `python` on Windows:
+
+```bash
+python3 ~/.kironomics/report.py setup --key "API_KEY"
+```
+
+Setup stores the key, writes `.kiro/hooks/kironomics.json` with absolute paths to the Python interpreter and the reporter, and removes any old `.kiro/kironomics_report.py` from earlier versions of this Power. If the workspace has that old file, `--key` can be omitted: setup reuses the key from it.
+
+Do not hand-write the hooks file. Setup generates it so the commands work on macOS, Linux and Windows.
 
 ### Step 5: Confirm Setup
 
 Tell the user:
 
-> "Kironomics setup complete. Created:
-> - `.kiro/kironomics_report.py`
+> "Kironomics setup complete:
+> - Tracker installed at `~/.kironomics/report.py` (your key is stored next to it, outside this project)
 > - `.kiro/hooks/kironomics.json` (3 hooks: tool counter, prompt counter, session reporter)
 >
-> Restart Kiro (or reload the window) so the hooks register. Then just build normally — your stats appear on the leaderboard at https://www.awsugmdu.in/kironomics."
+> Reload the Kiro window so the hooks register. Then just build normally — your stats appear on the leaderboard at https://www.awsugmdu.in/kironomics."
 
 ## How Tracking Works
 
 Once setup is complete, tracking is fully passive and silent.
 
 **During a session:**
-- The `UserPromptSubmit` hook fires on every prompt the user submits. It increments `/tmp/kironomics_prompts` and records the session start time on the first prompt.
-- The `PostToolUse` hook fires after every tool the AI calls (read_file, str_replace, execute_bash, etc.). It increments `/tmp/kironomics_tools`.
-- Both hooks run in under 2ms and produce no chat output.
+- The `UserPromptSubmit` hook fires on every prompt the user submits. It runs `report.py count prompt`, which increments a counter in the OS temp directory and records the session start time on the first prompt.
+- The `PostToolUse` hook fires after every tool the AI calls (read_file, str_replace, execute_bash, etc.). It runs `report.py count tool`.
+- Both hooks are tiny and produce no chat output.
 
 **When the agent finishes (`Stop`):**
-- The session reporter hook runs `python3 .kiro/kironomics_report.py`.
-- The script reads the temp counters, opens Kiro's `state.vscdb` in read-only mode, extracts `currentUsage`, `usageLimit`, `percentageUsed`, and `resetDate`, then POSTs everything to `{API_BASE}/kironomics/session`.
+- The session reporter hook runs `report.py send`.
+- The reporter reads the temp counters, opens Kiro's `state.vscdb` in read-only mode, extracts `currentUsage`, `usageLimit`, `percentageUsed`, `resetDate` and active bonus credit pools, then POSTs everything with its version number to `{API_BASE}/kironomics/session`.
+- If the backend reports a newer reporter, it prints a one-line update notice (at most once a day). It never updates itself.
 - After sending, the script deletes the temp counters so the next session starts fresh.
 
 **On the backend:**
@@ -284,33 +162,49 @@ Auto-Auto users skip credit tracking but still earn hook-based scores.
 
 ### Workflow: Setting Up in a New Workspace
 
-The user activates the power, pastes their API key, and the agent runs through Steps 3 to 5 of Onboarding to create the two files. No backend URL needed — the hosted endpoint is built in.
+The user activates the power and the agent runs Steps 3 to 5 of Onboarding. If `~/.kironomics/report.py` and `~/.kironomics/token` already exist on this machine, skip Step 3 and run setup without `--key`.
+
+### Workflow: Updating Kironomics
+
+When the user asks to "update Kironomics" (or the leaderboard site or a chat notice says their tracker is out of date):
+
+1. If `~/.kironomics/report.py` exists, run:
+
+   ```bash
+   python3 ~/.kironomics/report.py update
+   ```
+
+   It downloads the latest published reporter, checks it, and replaces the installed one. Hooks keep working — they point at the same file.
+
+2. If it does not exist, or the workspace still has `.kiro/kironomics_report.py` (installed by an older version of this Power), do Step 3 of Onboarding, then run `python3 ~/.kironomics/report.py setup` in the workspace. Setup reuses the key from the old file and removes it.
+
+3. Ask the user to reload the Kiro window if setup ran.
 
 ### Workflow: Verifying Tracking Is Active
 
-After setup and a Kiro restart, the user can verify hooks are firing during work:
+After setup and a reload, the user can check that hooks are firing:
 
 ```bash
-cat /tmp/kironomics_prompts
-cat /tmp/kironomics_tools
-cat /tmp/kironomics_start
+python3 ~/.kironomics/report.py status
 ```
 
-These should show increasing counts and a Unix timestamp.
+It shows the reporter version, whether the key is set, the current tool and prompt counters, and the credit reading.
 
 ### Workflow: Manually Triggering a Session Report
 
-To test the full flow without waiting for the agent to stop:
-
 ```bash
-python3 .kiro/kironomics_report.py
+python3 ~/.kironomics/report.py send
 ```
 
-This reads the current counters, reads `state.vscdb`, POSTs to the backend, and clears the temp files. Refresh the leaderboard to confirm.
+This POSTs the current counters and credit reading, then clears the counters. Refresh the leaderboard to confirm.
 
 ### Workflow: Updating the API Key
 
-If the user regenerates their API key, edit `.kiro/kironomics_report.py` and change the `API_KEY` constant. Or re-run onboarding to recreate the files.
+If the user regenerates their API key, run setup again with the new key:
+
+```bash
+python3 ~/.kironomics/report.py setup --key "NEW_API_KEY"
+```
 
 ## Troubleshooting
 
@@ -330,7 +224,7 @@ If the user regenerates their API key, edit `.kiro/kironomics_report.py` and cha
 
 **Cause:** Invalid API key, or the agent hasn't finished a turn yet.
 
-**Solution:** Confirm `API_KEY` in `.kiro/kironomics_report.py` matches the key from https://www.awsugmdu.in/kironomics. Send a prompt, let the agent finish (the `Stop` hook fires), then refresh the leaderboard. You can also run `python3 .kiro/kironomics_report.py` manually to test.
+**Solution:** Run `python3 ~/.kironomics/report.py status` and check the key is set; if in doubt, re-run setup with the key from https://www.awsugmdu.in/kironomics. Send a prompt, let the agent finish (the `Stop` hook fires), then refresh the leaderboard. You can also run `python3 ~/.kironomics/report.py send` manually to test.
 
 ### Plan shows "Auto-Auto" but I'm on Kiro Pro
 
@@ -343,14 +237,15 @@ If the user regenerates their API key, edit `.kiro/kironomics_report.py` and cha
 **Solution:** Delete these files, then restart Kiro:
 
 ```bash
-rm -f .kiro/kironomics_report.py
 rm -f .kiro/hooks/kironomics.json
 ```
 
+To remove it from the machine entirely, also delete `~/.kironomics/`.
+
 ## Best Practices
 
-- **One workspace, one setup.** Run onboarding once per workspace.
-- **Keep the reporter script absolute-pathed in the hook.** This avoids issues when Kiro runs the hook from a different working directory.
+- **One machine, one reporter; one setup per workspace.** The reporter is shared; each workspace needs `setup` once to get its hooks file.
+- **Never copy the reporter into the workspace.** Updates only reach `~/.kironomics/report.py`.
 - **Don't edit `state.vscdb` manually.** It's Kiro's internal database. Editing it can corrupt your IDE and trigger anti-cheat flags.
 - **Use the same API key across machines.** This consolidates your stats under one user.
 
@@ -369,18 +264,21 @@ The reporter and leaderboard use these backend endpoints (base: `https://2q4zt5z
 | POST | `/kironomics/users/profile` | Mint/return the caller's API key (used by the website, Cognito-authenticated) |
 | GET | `/kironomics/health` | Health check |
 
-## Files Created in Workspace
+## Files Created
 
-After running the onboarding, the workspace contains:
+After running the onboarding:
 
 ```
-.kiro/
-├── kironomics_report.py    (Python session reporter)
+~/.kironomics/
+├── report.py               (shared reporter, one per machine)
+└── token                   (your API key, outside every project)
+
+<workspace>/.kiro/
 └── hooks/
     └── kironomics.json     (3 hooks: PostToolUse, UserPromptSubmit, Stop)
 ```
 
-To uninstall, delete those files and restart Kiro.
+To uninstall, delete the hooks file (and `~/.kironomics/` to remove it from the machine), then reload Kiro.
 
 ---
 
