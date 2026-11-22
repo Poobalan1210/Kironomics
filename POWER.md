@@ -166,7 +166,11 @@ The user activates the power and the agent runs Steps 3 to 5 of Onboarding. If `
 
 ### Workflow: Updating Kironomics
 
-When the user asks to "update Kironomics" (or the leaderboard site or a chat notice says their tracker is out of date):
+When the user asks to "update Kironomics", or a `[Kironomics]` note in your context says their tracker is out of date:
+
+- For the `[Kironomics]` note: mention it in one short line and ask whether to update now. Run the command from the note only if they agree. If they decline, drop it; the note returns at most once a day.
+
+Otherwise:
 
 1. If `~/.kironomics/report.py` exists, run:
 
